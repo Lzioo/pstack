@@ -147,7 +147,7 @@ int _tmain(int argc, _TCHAR* argv[])
 		printf("使用方法：pstack <pid>\n");
 		return 0;
 	}
-	pid = wcstod(argv[1],_T('\0'));
+	pid = wcstoul(argv[1],_T('\0'),0);
 
 	Init(pid);
 	TraceStack(pid);
