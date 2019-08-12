@@ -9,7 +9,6 @@
 
 
 HANDLE g_pHandle;//需要打印栈跟踪的进程句柄
-HANDLE g_tHandle;//需要打印栈跟踪的线程句柄
 
 void Init(const DWORD pid)
 {
@@ -31,32 +30,32 @@ void Unit()
 //打印tid线程的栈
 void TraceStack_aux(const DWORD tid)
 {
-	CONTEXT g_context = {0};
+	HANDLE tHandle;//需要打印栈跟踪的线程句柄
 
-	g_context.ContextFlags = CONTEXT_ALL;
-	g_tHandle = OpenThread(THREAD_ALL_ACCESS,false,tid);
+	CONTEXT context = {0};
 
-	if(g_tHandle == INVALID_HANDLE_VALUE){
+	context.ContextFlags = CONTEXT_ALL;
+	tHandle = OpenThread(THREAD_ALL_ACCESS,false,tid);
+
+	if(tHandle == INVALID_HANDLE_VALUE){
 		printf("OpenThread error,%u\n",GetLastError());
 		return;
 	}
 	//获得上下文前挂起线程
-	if(SuspendThread(g_tHandle)==-1)
+	if(SuspendThread(tHandle)==-1)
 		printf("SuspendThread error,%u\n",GetLastError());
-	if(!GetThreadContext(g_tHandle,&g_context)){
+	if(!GetThreadContext(tHandle,&context)){
 		printf("GetThreadContext error,%u\n",GetLastError());
 		return;
 	}
-	if(ResumeThread(g_tHandle)==-1)
-		printf("ResumeThread error,%u\n",GetLastError());
-
+	
 	//stackwalk参数
 	STACKFRAME sf = {0};
-	sf.AddrPC.Offset = g_context.Rip;
+	sf.AddrPC.Offset = context.Rip;
 	sf.AddrPC.Mode = AddrModeFlat;
-	sf.AddrFrame.Offset = g_context.Rbp;
+	sf.AddrFrame.Offset = context.Rbp;
 	sf.AddrFrame.Mode = AddrModeFlat;
-	sf.AddrStack.Offset = g_context.Rsp;
+	sf.AddrStack.Offset = context.Rsp;
 	sf.AddrStack.Mode = AddrModeFlat;
 
     DWORD64 dwDisplamentSym = 0;
@@ -72,7 +71,7 @@ void TraceStack_aux(const DWORD tid)
 	line.SizeOfStruct = sizeof(IMAGEHLP_LINE64);
 
 	//循环获得堆栈里的栈帧
-	while(StackWalk64(MachineType, g_pHandle, g_tHandle,&sf, &g_context, NULL, 
+	while(StackWalk64(MachineType, g_pHandle, tHandle,&sf, &context, NULL, 
 					  SymFunctionTableAccess64, SymGetModuleBase64, NULL))
 	{
 		DWORD64 address = sf.AddrPC.Offset;
@@ -80,14 +79,6 @@ void TraceStack_aux(const DWORD tid)
 		//打印符号
 		if(!SymGetSymFromAddr64(g_pHandle, address, &dwDisplamentSym, &sym)){
 			printf("#%d    %08x+ SymGetSymFromAddr error, %u,%s", count++, GetLastError());
-			/*DWORD LocaleSystem = MAKELANGID(LANG_NEUTRAL, SUBLANG_NEUTRAL);
-			HANDLE handle = NULL;
-			FormatMessageW(FORMAT_MESSAGE_FROM_HMODULE | FORMAT_MESSAGE_IGNORE_INSERTS |
-						   FORMAT_MESSAGE_ALLOCATE_BUFFER, g_tHandle, GetLastError(),
-						   LocaleSystem,(PTSTR)&handle, 0, NULL);
-			LPVOID v1 = LocalLock(handle);
-			printf("错误类型描述: %ls\r", v1);
-			LocalFree(handle);*/
 		}else{
 			printf("#%d    %08x+ in %s ", count++, sym.Address, sym.Name);
 		}
@@ -99,7 +90,10 @@ void TraceStack_aux(const DWORD tid)
 			printf(" from %s.%d\n", line.FileName, line.LineNumber);		
 		}
 	}
-	CloseHandle(g_tHandle);
+	//恢复线程
+	if(ResumeThread(tHandle)==-1)
+		printf("ResumeThread error,%u\n",GetLastError());
+	CloseHandle(tHandle);
 }
 
 //获得pid进程的所有线程
