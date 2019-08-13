@@ -8,6 +8,25 @@
 #pragma comment(lib, "dbghelp.lib")
 
 
+#ifdef _M_IX86
+#define IP(c) c.Eip
+#define BP(c) c.Ebp
+#define SP(c) c.Esp
+#define MACHINE_TYPE IMAGE_FILE_MACHINE_I386
+#endif
+
+#ifdef _M_X64
+#define IP(c) c.Rip
+#define BP(c) c.Rbp
+#define SP(c) c.Rsp
+#define MACHINE_TYPE IMAGE_FILE_MACHINE_AMD64
+#endif
+
+
+
+
+
+
 HANDLE g_pHandle;//需要打印栈跟踪的进程句柄
 
 void Init(const DWORD pid)
@@ -27,7 +46,10 @@ void Unit()
 	CloseHandle(g_pHandle);
 }
 
-//打印tid线程的栈
+
+const int MaxNameLen = 255;
+IMAGEHLP_SYMBOL64* pSymbol = (IMAGEHLP_SYMBOL64*)malloc(sizeof(IMAGEHLP_SYMBOL64)+MaxNameLen*sizeof(TCHAR));
+IMAGEHLP_LINE64* pLine = (IMAGEHLP_LINE64*)malloc(sizeof(IMAGEHLP_LINE64));
 void TraceStack_aux(const DWORD tid)
 {
 	HANDLE tHandle;//需要打印栈跟踪的线程句柄
@@ -51,43 +73,43 @@ void TraceStack_aux(const DWORD tid)
 	
 	//stackwalk参数
 	STACKFRAME sf = {0};
-	sf.AddrPC.Offset = context.Rip;
+	sf.AddrPC.Offset = IP(context);
 	sf.AddrPC.Mode = AddrModeFlat;
-	sf.AddrFrame.Offset = context.Rbp;
+	sf.AddrFrame.Offset = BP(context);
 	sf.AddrFrame.Mode = AddrModeFlat;
-	sf.AddrStack.Offset = context.Rsp;
+	sf.AddrStack.Offset = SP(context);
 	sf.AddrStack.Mode = AddrModeFlat;
 
     DWORD64 dwDisplamentSym = 0;
 	DWORD dwDisplacementLine = 0;
-	DWORD MachineType = IMAGE_FILE_MACHINE_AMD64;
 	int count = 0;
 
-	IMAGEHLP_SYMBOL64 sym = { 0 };
-    sym.SizeOfStruct = sizeof(IMAGEHLP_SYMBOL);
-    sym.MaxNameLength = sizeof(SYMBOL_INFO);
-
-	IMAGEHLP_LINE64 line = {0};
-	line.SizeOfStruct = sizeof(IMAGEHLP_LINE64);
-
+	//打印tid线程的栈
+	/*IMAGEHLP_SYMBOL64 sym = { 0 };
+	sym.SizeOfStruct = sizeof(IMAGEHLP_SYMBOL64);
+    sym.MaxNameLength = 1024;
+	*/
+	pSymbol->SizeOfStruct = sizeof(IMAGEHLP_SYMBOL64);
+	pSymbol->MaxNameLength = MaxNameLen;
+	pLine->SizeOfStruct = sizeof(IMAGEHLP_LINE64);
 	//循环获得堆栈里的栈帧
-	while(StackWalk64(MachineType, g_pHandle, tHandle,&sf, &context, NULL, 
+	while(StackWalk64(MACHINE_TYPE, g_pHandle, tHandle,&sf, &context, NULL, 
 					  SymFunctionTableAccess64, SymGetModuleBase64, NULL))
 	{
 		DWORD64 address = sf.AddrPC.Offset;
 
 		//打印符号
-		if(!SymGetSymFromAddr64(g_pHandle, address, &dwDisplamentSym, &sym)){
-			printf("#%d    %08x+ SymGetSymFromAddr error, %u,%s", count++, GetLastError());
+		if(!SymGetSymFromAddr64(g_pHandle, address, &dwDisplamentSym, pSymbol)){
+			printf("#%d    SymGetSymFromAddr error, %u", count++, GetLastError());
 		}else{
-			printf("#%d    %08x+ in %s ", count++, sym.Address, sym.Name);
+			printf("#%d    %08x+ in %s ", count++, pSymbol->Address, pSymbol->Name);
 		}
 		//打印文件名和行号
-		if(!SymGetLineFromAddr64(g_pHandle, address, &dwDisplacementLine, &line)){
-			//printf("SymGetLineFromAddr error, %u\n", GetLastError());
+		if(!SymGetLineFromAddr64(g_pHandle, address, &dwDisplacementLine, pLine)){
+			//printf("SymGetLineFromAddr error, %u", GetLastError());
 			printf("\n");
 		}else{
-			printf(" from %s.%d\n", line.FileName, line.LineNumber);		
+			printf(" from %s.%d\n", pLine->FileName, pLine->LineNumber);		
 		}
 	}
 	//恢复线程
@@ -141,8 +163,8 @@ int _tmain(int argc, _TCHAR* argv[])
 		printf("使用方法：pstack <pid>\n");
 		return 0;
 	}
-	pid = wcstoul(argv[1],_T('\0'),0);
-
+	pid = wcstoul(argv[1],('\0'),0);
+	//pid = 8680;
 	Init(pid);
 	TraceStack(pid);
 	Unit();
